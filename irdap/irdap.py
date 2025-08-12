@@ -40,6 +40,7 @@ import configparser
 import textwrap
 import urllib
 import photutils
+import photutils.aperture
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
@@ -5010,8 +5011,8 @@ def compute_contrast(frame, filter_used, sigma_clip=True):
         coord_apertures = np.stack([x, y]).T
 
         # Define the apertures and compute the flux in them
-        apertures = photutils.CircularAperture(coord_apertures, 0.5*fwhm)
-        flux = np.array(photutils.aperture_photometry(frame, apertures)['aperture_sum'])
+        apertures = photutils.aperture.CircularAperture(coord_apertures, 0.5*fwhm)
+        flux = np.array(photutils.aperture.aperture_photometry(frame, apertures)['aperture_sum'])
 
         if sigma_clip:
             # Remove outliers from fluxes
@@ -5206,14 +5207,14 @@ def plot_contrast_point_source(path_table_star_flux, path_flux_left, path_flux_r
 
     # Define same aperture as used for contrast above to extract flux with
     coord_aperture = (511.5, 511.5)
-    aperture = photutils.CircularAperture(coord_aperture, 0.5*fwhm)
+    aperture = photutils.aperture.CircularAperture(coord_aperture, 0.5*fwhm)
 
     # Determine star flux in left flux cubes
     cube_flux_processed_left = pyfits.getdata(path_flux_left, header=True)[0]
 
     reference_flux_left = 0
     for frame, transmission_ratio_sel, dit_ratio_sel in zip(cube_flux_processed_left, transmission_ratio, dit_ratio):
-        flux = photutils.aperture_photometry(frame, aperture)['aperture_sum'][0]
+        flux = photutils.aperture.aperture_photometry(frame, aperture)['aperture_sum'][0]
         reference_flux_left += flux * transmission_ratio_sel * dit_ratio_sel
 
     # Divide by the number of frames because we actually need the mean of the different FLUX-files
@@ -5224,7 +5225,7 @@ def plot_contrast_point_source(path_table_star_flux, path_flux_left, path_flux_r
 
     reference_flux_right = 0
     for frame, transmission_ratio_sel, dit_ratio_sel in zip(cube_flux_processed_right, transmission_ratio, dit_ratio):
-        flux = photutils.aperture_photometry(frame, aperture)['aperture_sum'][0]
+        flux = photutils.aperture.aperture_photometry(frame, aperture)['aperture_sum'][0]
         reference_flux_right += flux * transmission_ratio_sel * dit_ratio_sel
 
     # Divide by the number of frames because we actually need the mean of the different FLUX-files
