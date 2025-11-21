@@ -345,7 +345,6 @@ def create_overview_headers(path_raw_dir, path_overview, log=True):
 
     # Define the minimum separation between the column strings in the overview
     min_separation = 4
-
     # Create empty array to store overview in
     m = len(header)
     n = len(header_names)
@@ -381,7 +380,8 @@ def create_overview_headers(path_raw_dir, path_overview, log=True):
                 #Update by B. Ren for data without Stokes params (Update 2023-04-06)
                 try:
                     if header_sel['ESO OCS DPI H2RT STOKES'] == '':
-                        pass #means read was good
+                        pass
+                    #means read was good
                 except: #means no Stokes parameters in raw data, now editing
                     stokes_this = None
                     if abs(int(np.round(header_sel['ESO INS4 DROT3 POSANG']))) == 56:
@@ -581,9 +581,9 @@ def check_sort_data_create_directories(frames_to_remove=[],
     # Extract headers
     header = [pyfits.getheader(x) for x in path_raw_files]
     # check_own_programs(header)
-
     # Sort raw files and headers based on observation date in headers
     date_obs = [x['DATE-OBS'] for x in header]
+    # print(date_obs, "hey")
     sort_index = list(np.argsort(date_obs))
     path_raw_files = [path_raw_files[i] for i in sort_index]
     header = [header[i] for i in sort_index]
@@ -912,12 +912,13 @@ def check_sort_data_create_directories(frames_to_remove=[],
             indices_to_remove_object.append(indices_sel)
             file_index_object.append(file_index_sel)
             NDIT_object.append(NDIT_sel)
-
+            real_ndit = header_sel['NDIT BEF SLICE']
             # Append Stokes parameter to list
             try:
                 stokes_parameter.append(header_sel['ESO OCS DPI H2RT STOKES'])
             except: # "Keyword 'ESO OCS DPI H2RT STOKES' not found."
                 #Edited by B. Ren for when this header is not availble in early obs (Update 2023-04-06)
+                printandlog('\nWARNING, the header ESO OCS DPI H2RT STOKES is not found in file ' + os.path.basename(file_sel) + '. Inferring the Stokes parameter from the DROT3 POSANG value instead.')
                 stokes_this = None
                 if abs(int(np.round(header_sel['ESO INS4 DROT3 POSANG']))) == 56:
                     stokes_this = 'Qplus'
@@ -934,6 +935,7 @@ def check_sort_data_create_directories(frames_to_remove=[],
             # Calculate mean Julian date halfway the exposure
             mjd = header_sel['MJD-OBS']
             file_execution_time = NDIT_sel * (0.938 + object_exposure_time) + 2.4
+            # Why 2.4? 
             mjd_half_object.append(mjd + 0.5 * file_execution_time / msd)
 
         elif header_sel['ESO DPR TYPE'] == 'SKY' and \
@@ -951,6 +953,7 @@ def check_sort_data_create_directories(frames_to_remove=[],
             # Calculate mean Julian date halfway the exposure
             mjd = header_sel['MJD-OBS']
             file_execution_time = NDIT_sel * (0.938 + object_exposure_time) + 1.4
+            # Why 1.4?
             mjd_half_center.append(mjd + 0.5 * file_execution_time / msd)
 
         elif header_sel['ESO DPR TYPE'] == 'OBJECT,FLUX':
@@ -966,7 +969,6 @@ def check_sort_data_create_directories(frames_to_remove=[],
 
         else:
             path_imcompatible_files.append(file_sel)
-
     # Sort DARK(,BACKGROUND)- and FLAT-files based on exposure time in headers
     exposure_time_dark = [pyfits.getheader(x)['ESO DET SEQ1 DIT'] for x in path_dark_files]
     sort_index = list(np.argsort(exposure_time_dark))
@@ -990,26 +992,26 @@ def check_sort_data_create_directories(frames_to_remove=[],
     ###############################################################################
 
     # Find object-files that do not form a pair with their Q/U^+/- counterpart
+    # (Jinsong Luo, 2025/11/7, change the code to avoid sliced fits from being removed. real_ndit replaced "1" in the original code)
     files_to_remove_stokes = []
     n = len(stokes_parameter)
-
     if identifier_no_Stokes_header is False:
         for i in range(n):
             if stokes_parameter[i] == 'Qplus':
                 if i + 1 == n:
                     files_to_remove_stokes.append(i)
-                elif stokes_parameter[i + 1] != 'Qminus':
+                elif stokes_parameter[i + real_ndit] != 'Qminus':
                     files_to_remove_stokes.append(i)
             if stokes_parameter[i] == 'Qminus':
-                if stokes_parameter[i - 1] != 'Qplus':
+                if stokes_parameter[i - real_ndit ] != 'Qplus':
                     files_to_remove_stokes.append(i)
             if stokes_parameter[i] == 'Uplus':
                 if i + 1 == n:
                     files_to_remove_stokes.append(i)
-                elif stokes_parameter[i + 1] != 'Uminus':
+                elif stokes_parameter[i + real_ndit ] != 'Uminus':
                     files_to_remove_stokes.append(i)
             if stokes_parameter[i] == 'Uminus':
-                if stokes_parameter[i - 1] != 'Uplus':
+                if stokes_parameter[i - real_ndit ] != 'Uplus':
                     files_to_remove_stokes.append(i)
     else: # do not remove the files for those without Stokes header (B. Ren, Update 2023-04-06), mainly older observations
         printandlog('\nWARNING, some of the FITS-file(s) are not in "Qplus, Qminus, Uplus, Uminus" sequence')
@@ -1174,11 +1176,11 @@ def check_sort_data_create_directories(frames_to_remove=[],
     printandlog('\nWrote file ' + os.path.join(path_preprocessed_dir, name_file_root + 'number_frames_QU.txt') + '.', wrap=False)
 
     return path_dark_files, path_flat_files, path_object_files, path_sky_files, path_center_files, \
-           path_object_center_files, path_flux_files, path_sky_flux_files, \
-           indices_to_remove_dark, indices_to_remove_flat, indices_to_remove_object, \
-           indices_to_remove_sky, indices_to_remove_center, indices_to_remove_object_center, \
-           indices_to_remove_flux, indices_to_remove_sky_flux, file_index_object, \
-           file_index_flux, object_centering_method, perform_adi
+        path_object_center_files, path_flux_files, path_sky_flux_files, \
+        indices_to_remove_dark, indices_to_remove_flat, indices_to_remove_object, \
+        indices_to_remove_sky, indices_to_remove_center, indices_to_remove_object_center, \
+        indices_to_remove_flux, indices_to_remove_sky_flux, file_index_object, \
+        file_index_flux, object_centering_method, perform_adi
 
 ###############################################################################
 # read_fits_files
@@ -1750,7 +1752,6 @@ def process_center_frames(path_center_files,
 
     for i, (path_center_sel, indices_center_sel, path_object_sel, indices_object_sel) in enumerate(
             zip(path_center_files, indices_to_remove_center, path_object_center_files, indices_to_remove_object_center)):
-        # Read data and header from file
         cube_center, header_center = read_fits_files(path=path_center_sel, silent=True)
 
         # Remove frames based on list of indices provided by the user
@@ -1824,7 +1825,6 @@ def process_center_frames(path_center_files,
         if i == 0 and center_subtract_object == False:
             printandlog('')
         printandlog('Processed file ' + str(i + 1) + '/' + str(len(path_center_files)) + ': {0:s}'.format(os.path.basename(path_center_sel)))
-
     return list_frame_center_processed, header
 
 ###############################################################################
@@ -2262,6 +2262,7 @@ def process_object_frames(path_object_files,
                           frame_master_flat,
                           frame_master_bpm,
                           frame_master_sky,
+                          single_frame,
                           sigma_filtering=True,
                           centering_method='center frames',
                           center_coordinates=(477, 521, 1503, 511),
@@ -2338,7 +2339,6 @@ def process_object_frames(path_object_files,
     File written by Rob van Holstein; based on function by Christian Ginski
     Function status: verified
     '''
-
     # Print centering method selected
     center_coordinates_print = tuple(x + 1 for x in center_coordinates)
     if centering_method == 'center frames':
@@ -2391,8 +2391,6 @@ def process_object_frames(path_object_files,
         y_fit_sub_image_template = np.zeros(2)
         list_sub_image_template = []
 
-    printandlog('')
-
     for i, (path_sel, indices_sel) in enumerate(zip(path_object_files, indices_to_remove_object)):
         # Read data and header from file
         cube_sel, header_sel = read_fits_files(path=path_sel, silent=True)
@@ -2414,7 +2412,6 @@ def process_object_frames(path_object_files,
                 # header_sel['ESO OCS DPI H2RT STOKES'] = stokes_this
                 header_sel['ESO OCS DPI H2RT STOKES'] = stokes_this
                 identifier_fill_header_Stokes = True
-        
         # Bin Ren: Calculate and correct parallactic angles for start and end values, save in memory
         header_sel = utils_parallactic_angles.parallactic_angles_IRDIS_correct(header_sel)
         
@@ -2438,7 +2435,6 @@ def process_object_frames(path_object_files,
 
         # Remove bad pixels of each frame
         cube_badpixel_filtered = remove_bad_pixels(cube=cube_bgsubtr_flatfielded, frame_master_bpm=frame_master_bpm, sigma_filtering=sigma_filtering)
-
         # Create zero arrays to save centered images in
         cube_left_centered = np.zeros((cube_badpixel_filtered.shape[-3], cube_badpixel_filtered.shape[-2], int(cube_badpixel_filtered.shape[-1] / 2)))
         cube_right_centered = np.copy(cube_left_centered)
@@ -2530,10 +2526,16 @@ def process_object_frames(path_object_files,
                                                          order=3, mode='constant', cval=0.0, prefilter=True), axis=0)
             cube_right_centered[j, :, :] = np.expand_dims(ndimage.shift(frame_right, [list_shift_y[1][-1], list_shift_x[1][-1]],
                                                          order=3, mode='constant', cval=0.0, prefilter=True), axis=0)
+            # ;-) Save centered frames and individual left and right frames
+            frame_left_centered = cube_left_centered[j, :, :]
+            frame_right_centered = cube_right_centered[j, :, :]
+            # use the function newly defined to save the data (Jinsong Luo at 2025/9/27, XMU)
 
         # Compute mean images of left and right image cubes
         frame_left_centered = np.mean(cube_left_centered, axis=0)
+        # print(len(frame_left_centered),"the length of frame_left_centered")
         frame_right_centered = np.mean(cube_right_centered, axis=0)
+        # print(len(frame_right_centered),"the length of frame_right_centered")
 
         # Append left and right frames and header to lists
         list_left_frames.append(frame_left_centered)
@@ -2673,7 +2675,7 @@ def process_object_frames(path_object_files,
 
     cube_left_frames = geometric_distortion_correction_cubes(cube_left_frames) #geometric correction code from Christian Ginski; line 1/5
     cube_right_frames = geometric_distortion_correction_cubes(cube_right_frames) #geometric correction code from Christian Ginski; line 2/5
-
+    print(len(header))
     return cube_left_frames, cube_right_frames, header
 
 def geometric_distortion_correction_cubes(in_cube): #geometric correction code from Christian Ginski; line 3/5
@@ -2896,6 +2898,7 @@ def process_flux_frames(path_flux_files,
                                                                 frame_master_bpm=frame_master_bpm,
                                                                 frame_master_sky=frame_master_sky_flux,
                                                                 sigma_filtering=sigma_filtering,
+                                                                single_frame=False,
                                                                 centering_method=centering_method,
                                                                 center_coordinates=center_coordinates,
                                                                 param_centering=param_centering,
@@ -2921,7 +2924,7 @@ def process_flux_frames(path_flux_files,
     # Create frame showing annulus used to determine background
     frame_annulus_background = compute_annulus_values(cube=cube_flux_processed_left[0], param=annulus_background)[1]
 
-     # Print number of FLUX-files and -frames processed
+    # Print number of FLUX-files and -frames processed
     number_frames_total = sum([pyfits.getheader(x)['ESO DET NDIT'] for x in path_flux_files])
     number_frames_removed = sum([len(x) for x in indices_to_remove_flux])
     number_frames_used = number_frames_total - number_frames_removed
@@ -3336,7 +3339,6 @@ def preprocess_data(frames_to_remove=[],
                                          save_preprocessed_data=save_preprocessed_data,
                                          show_images_center_coordinates=show_images_center_coordinates,
                                          perform_adi=perform_adi)
-
     ###############################################################################
     # Computing master flat and bad pixel map or reading static ones
     ###############################################################################
@@ -3438,11 +3440,14 @@ def preprocess_data(frames_to_remove=[],
                                                                            center_subtract_object=center_subtract_object,
                                                                            center_coordinates=object_center_coordinates,
                                                                            sigma_filtering=sigma_filtering)
-
         # Write processed center frames
         path_processed_center_files = [os.path.join(path_center_dir, os.path.splitext(os.path.basename(x))[0] + '_processed.fits') for x in path_center_files]
         printandlog('')
         write_fits_files(data=list_frame_center_processed, path=path_processed_center_files, header=header_center, silent=False)
+        print(type(list_frame_center_processed), "type of list_frame_center_processed")
+        print(type(path_processed_center_files), "type of path_processed_center_files")
+        print(type(header_center), "type of header_center")
+        print(np.shape(list_frame_center_processed))
 
         # Find center coordinates and replace values of center_coordinates
         object_center_coordinates = find_center_coordinates(list_frame_center_processed=list_frame_center_processed,
@@ -3480,6 +3485,7 @@ def preprocess_data(frames_to_remove=[],
                                                                         frame_master_bpm=frame_master_bpm,
                                                                         frame_master_sky=frame_master_sky,
                                                                         sigma_filtering=sigma_filtering,
+                                                                        single_frame=True,
                                                                         centering_method=object_centering_method,
                                                                         center_coordinates=object_center_coordinates,
                                                                         param_centering=object_param_centering,
@@ -3599,6 +3605,7 @@ def preprocess_data(frames_to_remove=[],
         # Write frame showing annulus used to determine star flux from
         printandlog('')
         write_fits_files(data=frame_annulus_star_flux, path=os.path.join(path_flux_dir, name_file_root + 'annulus_star_flux.fits'), header=False)
+        
 
         # Write the results to a CSV-file
         table_star_flux = pd.DataFrame({'FILE': [x + 1 for x in file_index_flux],
@@ -3663,6 +3670,7 @@ def compute_double_sum_double_difference(cube_single_sum, cube_single_difference
     indices_Qminus = np.nonzero(stokes_parameter == 'Qminus')[0]
     indices_Uplus = np.nonzero(stokes_parameter == 'Uplus')[0]
     indices_Uminus = np.nonzero(stokes_parameter == 'Uminus')[0]
+    print("Qplus:", len(indices_Qplus), "Qminus:", len(indices_Qminus), "Uplus:", len(indices_Uplus), "Uminus:", len(indices_Uminus))
 
     # Compute double sum I_Q- and I_U-cubes
     cube_I_Q_double_sum = 0.5*(cube_single_sum[indices_Qplus, :, :] + cube_single_sum[indices_Qminus, :, :])
@@ -3687,7 +3695,8 @@ def compute_double_sum_double_difference(cube_single_sum, cube_single_difference
 
         cube_Q_double_difference = cube_q*cube_I_Q_double_sum
         cube_U_double_difference = cube_u*cube_I_U_double_sum
-
+    
+    print("Qplus:", len(indices_Qplus), "Qminus:", len(indices_Qminus), "Uplus:", len(indices_Uplus), "Uminus:", len(indices_Uminus))
     return cube_I_Q_double_sum, cube_I_U_double_sum, cube_Q_double_difference, cube_U_double_difference
 
 ###############################################################################
@@ -5446,6 +5455,7 @@ def apply_pdi(cube_left_frames,
 
     # Compute single sum and single difference cubes
     cube_single_sum = cube_left_frames + cube_right_frames
+    print(np.shape(cube_single_sum))
     cube_single_difference = cube_left_frames - cube_right_frames
 
     # Compute double sum and double difference cubes
@@ -6508,6 +6518,16 @@ def create_overview_headers_main(path_main_dir):
 # run_pipeline
 ###############################################################################
 
+def clear_fits_files(folder_path):
+    if os.path.exists(folder_path):
+        fits_files = glob.glob(os.path.join(folder_path, '*.fits'))
+        for f in fits_files:
+            os.remove(f)
+        print(f"has delete fits files stay in split before")
+    else:
+        print(f"folder {folder_path} not exist")
+        os.makedirs(folder_path)
+
 def run_pipeline(path_main_dir):
     '''
     Run the pipeline
@@ -6581,7 +6601,71 @@ def run_pipeline(path_main_dir):
     irdis_gain = 1.75
 
     # Define paths of directories
+    # 重生锚
     path_raw_dir = os.path.join(path_main_dir, 'raw')
+    path_split_dir = os.path.join(path_main_dir, 'split')
+    clear_fits_files(path_split_dir)
+    def split_files_into_single_frame_file(path_raw_dir, split_type,path_split_file):
+        header_object = []
+        path_files_in_this_func = []
+        path_raw_files = glob.glob(os.path.join(path_raw_dir, '*.fits'))
+        for path in path_raw_files:
+            header = pyfits.getheader(path)  
+            if header['ESO DPR TYPE'] in split_type:
+                header_object.append(header)
+        for raw_file_path in path_raw_files:
+            fits_header = pyfits.getheader(raw_file_path)
+            if 'ESO DPR TYPE' in fits_header:
+                if fits_header['ESO DPR TYPE'] in split_type:
+                    path_files_in_this_func.append(raw_file_path)
+                else:
+                    shutil.copy2(raw_file_path, path_split_file)
+        def slice_and_save_frames(path_files_in_this_func, header_object, path_raw_dir, utils_parallactic_angles, path_split_file):
+            import os
+            import numpy as np
+            import astropy.io.fits as pyfits
+            # 1. 
+            date_obs_list = [pyfits.getheader(path)['DATE-OBS'] for path in path_files_in_this_func]
+            sort_index = np.argsort(date_obs_list)
+            obs_headers = date_obs_list
+            path_files_sorted = [path_files_in_this_func[i] for i in sort_index]
+            header_object_sorted = [header_object[i] for i in sort_index]
+            # 2. 
+            for i, (path_obj, header_sel) in enumerate(zip(path_files_sorted, header_object_sorted)):
+                header_sel['IS SLICE DONE'] = '1'
+                frame_headers = utils_parallactic_angles.parallactic_angles_IRDIS_correct(header_sel)
+                cube, _ = read_fits_files(path_obj,silent=True)
+                for j, frame_header in enumerate(frame_headers):
+                    frame_data = cube[j]
+                    date_obs = frame_header['DATE-OBS']
+                    fits_type = frame_header['ESO DPR TYPE']
+                    new_filename = f"{fits_type}_{i+1:03d}_frame_{j+1:03d}_{date_obs.replace(':','_')}.fits"
+                    new_path = os.path.join(path_split_file, new_filename)
+                    # use write_fits_files
+                    write_fits_files(
+                        data=frame_data,
+                        path=new_path,
+                        header=frame_header,
+                        silent=True
+                    )
+
+        slice_and_save_frames(path_files_in_this_func, header_object, path_raw_dir, utils_parallactic_angles, path_split_file)
+        print("For frame that index is not 0, MJD-OBS is minused by param_O_START/2 for better accuracy. DO NOT trust their MJD-OBS since it does NOT represent the real time.")
+    
+    # this is the descision tree for user to split files or not(split flux files or not)
+    split_object_or_not = input('The first question: Do you want to split OBJECT files into single frame files and use them? (y/n): ')
+    split_flux_or_not = input('Please notice that this is a different question. Do you want to split FLUX files, into single frame files, and use them? (y/n): ')
+    split_type = []
+    if split_object_or_not == 'y':
+        if split_flux_or_not == 'y':
+            split_type.append('OBJECT')
+            split_type.append('OBJECT,FLUX')
+        else:
+            split_type.append('OBJECT')
+    if split_type != [] :
+        split_files_into_single_frame_file(path_raw_dir, split_type, path_split_dir)
+        path_raw_dir = path_split_dir
+
     path_log_config_dir = os.path.join(path_main_dir, 'logs')
     path_calib_dir = os.path.join(path_main_dir, 'calibration')
     path_flat_dir = os.path.join(path_calib_dir, 'flat')
