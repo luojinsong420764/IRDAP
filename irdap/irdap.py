@@ -64,8 +64,8 @@ from skimage.transform import rotate as rotateskimage
 from skimage.registration import phase_cross_correlation
 from .version import __version__
 from .pca_adi import pca_adi
-
 from . import utils_parallactic_angles
+from astropy.time import Time
 
 # to avoid some warning from pandas and matplotlib
 from pandas.plotting import register_matplotlib_converters
@@ -120,17 +120,19 @@ def read_config_file(path_config_file):
 
     # Read the configuration file
     config_read = config.read(path_config_file)
-
     # Raise error if configuration file does not exist
     if len(config_read) == 0:
         raise IOError('\n\nThere is no valid configuration file ' + path_config_file + '.')
-
     # Get parameters from [Basic pre-processing options] section
+    # ......and read whether to slice object and flux files, jinsong Luo 2025/11/28.
     perform_preprocessing   = config_true_false(config.get('Basic pre-processing options', 'perform_preprocessing'))
     sigma_filtering         = config_true_false(config.get('Basic pre-processing options', 'sigma_filtering'))
     object_collapse_ndit    = config_true_false(config.get('Basic pre-processing options', 'object_collapse_ndit'))
+    slice_object_file       = config_true_false(config.get('Basic pre-processing options', 'slice_object_file'))
+    slice_flux_file         = config_true_false(config.get('Basic pre-processing options', 'slice_flux_file'))
     object_centering_method = config.get('Basic pre-processing options', 'object_centering_method')
     frames_to_remove        = literal_eval(config.get('Basic pre-processing options', 'frames_to_remove'))
+
 
     # Get parameters from [Basic PDI options] section
     perform_pdi                    = config_true_false(config.get('Basic PDI options', 'perform_pdi'))
@@ -169,6 +171,8 @@ def read_config_file(path_config_file):
     return perform_preprocessing, \
            sigma_filtering, \
            object_collapse_ndit, \
+           slice_object_file,\
+           slice_flux_file, \
            object_centering_method, \
            frames_to_remove, \
            perform_pdi, \
@@ -912,7 +916,10 @@ def check_sort_data_create_directories(frames_to_remove=[],
             indices_to_remove_object.append(indices_sel)
             file_index_object.append(file_index_sel)
             NDIT_object.append(NDIT_sel)
-            real_ndit = header_sel['NDIT BEF SLICE']
+            if header_sel['NAXIS3'] > 1:
+                real_ndit = 1
+            else: 
+                real_ndit = header_sel['NDIT BEF SLICE']
             # Append Stokes parameter to list
             try:
                 stokes_parameter.append(header_sel['ESO OCS DPI H2RT STOKES'])
@@ -935,8 +942,10 @@ def check_sort_data_create_directories(frames_to_remove=[],
             # Calculate mean Julian date halfway the exposure
             mjd = header_sel['MJD-OBS']
             file_execution_time = NDIT_sel * (0.938 + object_exposure_time) + 2.4
+            # mjd_half_object.append(header_sel['FRAME MIDDLE TIME'])  # Use FRAME MIDDLE TIME generated in utils_parallactic_angle.py, line 225. Jinsong Luo, 2025/11/22
             # Why 2.4? 
             mjd_half_object.append(mjd + 0.5 * file_execution_time / msd)
+            
 
         elif header_sel['ESO DPR TYPE'] == 'SKY' and \
            header_sel['ESO DET SEQ1 DIT'] == object_exposure_time and \
@@ -953,7 +962,7 @@ def check_sort_data_create_directories(frames_to_remove=[],
             # Calculate mean Julian date halfway the exposure
             mjd = header_sel['MJD-OBS']
             file_execution_time = NDIT_sel * (0.938 + object_exposure_time) + 1.4
-            # Why 1.4?
+            # 1.4s might be the right number, hence I only changed 2.4s. Jinsong Luo, 2025/11/22
             mjd_half_center.append(mjd + 0.5 * file_execution_time / msd)
 
         elif header_sel['ESO DPR TYPE'] == 'OBJECT,FLUX':
@@ -4346,7 +4355,7 @@ def correct_instrumental_polarization_effects(cube_I_Q_double_sum,
         printandlog('\nInterpolating the altitude angles using a separate spline for each of the ' + str(number_of_nights) + ' nights.')
 
     # Calculate mean Julian date halfway each exposure
-    file_execution_time = NDIT * (0.938 + exposure_time) + 2.4
+    file_execution_time = NDIT * (0.938 + exposure_time) + 1.4
     mjd_half = mjd + 0.5 * file_execution_time / msd
 
     # Compute mean altitude angle by interpolation (and extrapolation) using a separate spline for each night
@@ -6602,6 +6611,36 @@ def run_pipeline(path_main_dir):
 
     # Define paths of directories
     # 重生锚
+    path_config_file = os.path.join(path_main_dir, 'config.conf')
+    # read the config file to decide whether to slice the file or not. jinsong 2025/11/28
+    perform_preprocessing, \
+    sigma_filtering, \
+    object_collapse_ndit, \
+    slice_object_file,\
+    slice_flux_file, \
+    object_centering_method, \
+    frames_to_remove, \
+    perform_pdi, \
+    annulus_star, \
+    annulus_background, \
+    normalized_polarization_images, \
+    perform_adi, \
+    principal_components, \
+    pca_radii, \
+    center_subtract_object, \
+    center_param_centering, \
+    object_center_coordinates, \
+    object_param_centering, \
+    flux_centering_method, \
+    flux_center_coordinates, \
+    flux_param_centering, \
+    flux_annulus_background, \
+    flux_annulus_star, \
+    double_difference_type, \
+    single_posang_north_up, \
+    combination_method_polarization, \
+    combination_method_intensity \
+    = read_config_file(path_config_file)
     path_raw_dir = os.path.join(path_main_dir, 'raw')
     path_split_dir = os.path.join(path_main_dir, 'split')
     clear_fits_files(path_split_dir)
@@ -6621,9 +6660,6 @@ def run_pipeline(path_main_dir):
                 else:
                     shutil.copy2(raw_file_path, path_split_file)
         def slice_and_save_frames(path_files_in_this_func, header_object, path_raw_dir, utils_parallactic_angles, path_split_file):
-            import os
-            import numpy as np
-            import astropy.io.fits as pyfits
             # 1. 
             date_obs_list = [pyfits.getheader(path)['DATE-OBS'] for path in path_files_in_this_func]
             sort_index = np.argsort(date_obs_list)
@@ -6653,11 +6689,9 @@ def run_pipeline(path_main_dir):
         print("For frame that index is not 0, MJD-OBS is minused by param_O_START/2 for better accuracy. DO NOT trust their MJD-OBS since it does NOT represent the real time.")
     
     # this is the descision tree for user to split files or not(split flux files or not)
-    split_object_or_not = input('The first question: Do you want to split OBJECT files into single frame files and use them? (y/n): ')
-    split_flux_or_not = input('Please notice that this is a different question. Do you want to split FLUX files, into single frame files, and use them? (y/n): ')
     split_type = []
-    if split_object_or_not == 'y':
-        if split_flux_or_not == 'y':
+    if slice_object_file == 'True':
+        if slice_flux_file == 'True':
             split_type.append('OBJECT')
             split_type.append('OBJECT,FLUX')
         else:
@@ -6710,7 +6744,6 @@ def run_pipeline(path_main_dir):
 
     # Find path of log file from previous reduction
     path_log_file_old = glob.glob(os.path.join(path_main_dir,'*_log_*'))
-
     if len(path_log_file_old) > 1:
         raise IOError('\n\nThere should only be one log file in the directory ' + path_main_dir + '. Please remove the latest one.')
     elif len(path_log_file_old) == 1:
@@ -6731,7 +6764,6 @@ def run_pipeline(path_main_dir):
     ###############################################################################
 
     # Define the path of the configuration file and check if it exists
-    path_config_file = os.path.join(path_main_dir, 'config.conf')
     if not os.path.exists(path_config_file):
         raise IOError('\n\nThere is no configuration file ' + path_config_file + '. Run \'irdap --makeconfig\' first.')
 
@@ -6823,33 +6855,7 @@ def run_pipeline(path_main_dir):
 
     # Read configuration file
     printandlog('\nReading configuration file ' + path_config_file + '.')
-
-    perform_preprocessing, \
-    sigma_filtering, \
-    object_collapse_ndit, \
-    object_centering_method, \
-    frames_to_remove, \
-    perform_pdi, \
-    annulus_star, \
-    annulus_background, \
-    normalized_polarization_images, \
-    perform_adi, \
-    principal_components, \
-    pca_radii, \
-    center_subtract_object, \
-    center_param_centering, \
-    object_center_coordinates, \
-    object_param_centering, \
-    flux_centering_method, \
-    flux_center_coordinates, \
-    flux_param_centering, \
-    flux_annulus_background, \
-    flux_annulus_star, \
-    double_difference_type, \
-    single_posang_north_up, \
-    combination_method_polarization, \
-    combination_method_intensity \
-    = read_config_file(path_config_file)
+    # Original place where read_config file. jinsong 2025/11/28
 
     # Define some fixed input parameters
     save_preprocessed_data = True
@@ -6932,6 +6938,7 @@ def run_pipeline(path_main_dir):
         for x in config_file_lines:
             f.write(x)
     printandlog('\nCreated a copy of the used configuration file ' + path_config_file_copy_new + '.')
+    print(path_config_file_copy_new)
 
     ###############################################################################
     # Copy previous log and configuration files to separate directory
@@ -6960,6 +6967,7 @@ def run_pipeline(path_main_dir):
 
     # frames_to_remove
     if type(frames_to_remove) is not list:
+          print(frames_to_remove)
           raise TypeError('\n\n\'frames_to_remove\' should be an empty list or a list of integers and/or length-2-tuples of integers.')
 
     if len(frames_to_remove) != 0:
