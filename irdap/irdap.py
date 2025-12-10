@@ -4355,7 +4355,7 @@ def correct_instrumental_polarization_effects(cube_I_Q_double_sum,
         printandlog('\nInterpolating the altitude angles using a separate spline for each of the ' + str(number_of_nights) + ' nights.')
 
     # Calculate mean Julian date halfway each exposure
-    file_execution_time = NDIT * (0.938 + exposure_time) + 1.4
+    file_execution_time = NDIT * (0.938 + exposure_time) + 2.4
     mjd_half = mjd + 0.5 * file_execution_time / msd
 
     # Compute mean altitude angle by interpolation (and extrapolation) using a separate spline for each night
